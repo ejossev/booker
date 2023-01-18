@@ -1,10 +1,10 @@
 #include <thread>
 #include <vector>
 #include <iostream>
+
 #include "Kraken.hpp"
 #include "TriangularArbitrageFinder.hpp"
-
-
+#include "Config.hpp"
 
 void test_ob(KrakenExchange* kraken) {
   do{
@@ -40,10 +40,13 @@ void try_find_arbitrage(KrakenExchange* kraken) {
   } while(true);
 }
   
-
+//static pConf(new Poco::Util::IniFileConfiguration("test.ini"));
 
 int main() {
   KrakenExchange kraken;
+
+  std::cout << pConf->getInt("Kraken.OBDepth") << std::endl;
+
   kraken.start_connection_async();
   std::thread test(try_find_arbitrage, &kraken);
   test.join();

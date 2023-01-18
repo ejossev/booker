@@ -14,6 +14,7 @@
 
 #include "LeveledOrderBook.hpp"
 #include "Kraken.hpp"
+#include "Config.hpp"
 
 namespace {
 static const std::set<std::string> ignore_assets {"ETH2.S"};
@@ -113,7 +114,9 @@ void KrakenExchange::process_ws()
     }
   );
 
-  std::string subscribeMessage = "{ \"event\": \"subscribe\", \"pair\": [" + pairs + "], \"subscription\": { \"name\": \"book\", \"depth\": 25 } }";
+  std::string subscribeMessage = "{ \"event\": \"subscribe\", \"pair\": [" 
+          + pairs + "], \"subscription\": { \"name\": \"book\", \"depth\": "
+          + std::to_string(pConf->getInt("Kraken.OBDepth")) + "} }";
   ws.sendFrame(subscribeMessage.data(), subscribeMessage.size());
   //std::cout << subscribeMessage << std::endl;
   std::cout << "Subscribed to trade channel for " << pairs << " pair" << std::endl;

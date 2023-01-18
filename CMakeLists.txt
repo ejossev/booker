@@ -14,7 +14,7 @@ file(GLOB all_SRCS
         )
 
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD_REQUIRED True)
 find_package(Poco REQUIRED Net NetSSL Util JSON Foundation )
 

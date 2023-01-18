@@ -24,6 +24,8 @@ public:
   __int128 estimate_fee_from_1(__int128 amount) const override;
   __int128 estimate_fee_from_2(__int128 amount) const override;
 
+  
+
   void update() override;
 
   std::string print() const override;
