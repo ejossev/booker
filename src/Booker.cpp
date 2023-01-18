@@ -1,10 +1,17 @@
 #include <thread>
 #include <vector>
 #include <iostream>
+#include <Poco/Logger.h>
+#include <Poco/FileChannel.h>
+#include <Poco/AutoPtr.h>
+#include <Poco/AsyncChannel.h>
+#include <Poco/FormattingChannel.h>
+#include <Poco/PatternFormatter.h>
 
 #include "Kraken.hpp"
 #include "TriangularArbitrageFinder.hpp"
-#include "Config.hpp"
+#include "Utils.hpp"
+
 
 void test_ob(KrakenExchange* kraken) {
   do{
@@ -40,12 +47,28 @@ void try_find_arbitrage(KrakenExchange* kraken) {
   } while(true);
 }
   
-//static pConf(new Poco::Util::IniFileConfiguration("test.ini"));
+Poco::AutoPtr<Poco::Util::IniFileConfiguration> config(new Poco::Util::IniFileConfiguration("./Booker.ini"));
 
 int main() {
-  KrakenExchange kraken;
+  Poco::AutoPtr<Poco::FileChannel> p_filechannel(new Poco::FileChannel);
+  Poco::AutoPtr<Poco::PatternFormatter> p_pf(new Poco::PatternFormatter);
+  p_pf->setProperty("pattern", "%Y%m%d-%H:%M:%S %s: %t");
+  p_filechannel->setProperty("path", "Booker.log");
+  p_filechannel->setProperty("rotation", "2 M");
+  p_filechannel->setProperty("archive", "timestamp");
 
-  std::cout << pConf->getInt("Kraken.OBDepth") << std::endl;
+  Poco::AutoPtr<Poco::FormattingChannel> p_formatting_filechannel(new Poco::FormattingChannel(p_pf, p_filechannel));
+  Poco::AutoPtr<Poco::AsyncChannel> p_channel(new Poco::AsyncChannel(p_formatting_filechannel));
+
+
+  Poco::Logger::root().setChannel(p_channel);
+
+  Poco::Logger::root().setLevel(config->getString("Booker.LogLevel"));
+  Poco::Logger& logger2 = Poco::Logger::root().get("Booker");
+
+  poco_notice(logger2, "Starting application");
+
+  KrakenExchange kraken;
 
   kraken.start_connection_async();
   std::thread test(try_find_arbitrage, &kraken);

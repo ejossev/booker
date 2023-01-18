@@ -5,8 +5,7 @@
 #include "constants.hpp"
 #pragma once
 
-std::ostream&
-operator<<( std::ostream& dest, __int128_t value );
+
 
 class Symbol {
 private:

@@ -1,6 +1,7 @@
 #include <map>
 #include "LeveledOrderBook.hpp"
 #include "OrderBook.hpp"
+#include "Utils.hpp"
 #pragma once
 
 class KrakenExchange : public GenericOrderBookCollection {
@@ -13,9 +14,10 @@ class KrakenExchange : public GenericOrderBookCollection {
   void process_ws();
   void fetch_trading_pairs();
   uint64_t try_fetch_reference_rate(const std::string& pair_name);
+  Poco::Logger& logger;
 public:
+  KrakenExchange();
   bool initialized;
-
   void start_connection_async();
   virtual GenericOrderBook& get_order_book(Symbol& symbol1, Symbol& symbol2) override;
   virtual const GenericOrderBook& get_order_book(const Symbol& symbol1, const Symbol& symbol2) override;

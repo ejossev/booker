@@ -14,7 +14,7 @@
 
 #include "LeveledOrderBook.hpp"
 #include "Kraken.hpp"
-#include "Config.hpp"
+#include "Utils.hpp"
 
 namespace {
 static const std::set<std::string> ignore_assets {"ETH2.S"};
@@ -25,7 +25,9 @@ static const std::map<std::string, std::string> rewrite_assets {
   {"ZCAD", "CAD"}, {"ZEUR", "EUR"}, {"ZGBP", "GBP"}, {"ZJPY", "JPY"},
   {"ZUSD", "USD"}
 };
+
 static const std::string base_asset("USD");
+
 
 const std::string& rewrite_symbol(const std::string& orig) {
   const auto& it = rewrite_assets.find(orig);
@@ -36,6 +38,8 @@ const std::string& rewrite_symbol(const std::string& orig) {
 } //namespace
 
 NullOrderBook KrakenExchange::null_book;
+
+KrakenExchange::KrakenExchange() : logger(Poco::Logger::root().get("Kraken")) {};
 
 std::vector<Symbol> KrakenExchange::get_all_symbols() {
   std::vector<Symbol> rv;
@@ -101,7 +105,7 @@ void KrakenExchange::process_ws()
 
   // Set up WebSocket and connect
   Poco::Net::WebSocket ws(session, request, response);
-  std::cout << "Connected to Kraken WebSockets API" << std::endl;
+  poco_notice(logger, "Connected to Kraken WebSockets API");
 
 
   std::string pairs = "";
@@ -116,10 +120,9 @@ void KrakenExchange::process_ws()
 
   std::string subscribeMessage = "{ \"event\": \"subscribe\", \"pair\": [" 
           + pairs + "], \"subscription\": { \"name\": \"book\", \"depth\": "
-          + std::to_string(pConf->getInt("Kraken.OBDepth")) + "} }";
+          + std::to_string(config->getInt("Kraken.OBDepth")) + "} }";
   ws.sendFrame(subscribeMessage.data(), subscribeMessage.size());
-  //std::cout << subscribeMessage << std::endl;
-  std::cout << "Subscribed to trade channel for " << pairs << " pair" << std::endl;
+  poco_notice(logger, "Subscribed to trade channel for " + pairs + " pairs");
 
   // Receive and process messages from the WebSocket
   char buffer[8192];
@@ -141,9 +144,6 @@ void KrakenExchange::process_ws()
               size_t count = arr->size();
               std::string pair = arr->getElement<std::string>(count-1);
               LeveledOrderBook& ob = trading_pairs.find(pair)->second;
-
-              // if (pair == "XBT/USD")
-              //   std::cout << "got update " << buffer << std::endl;
 
               for (int i=1; i<count-2; i++) {
                 Poco::JSON::Object::Ptr changeObject = arr->getObject(i);
@@ -188,24 +188,24 @@ void KrakenExchange::process_ws()
                 // Ignore these messages for now, maybe use the confirmations later
                 //std::cout << "Received event update: " << buffer << std::endl;
               } else {
-                std::cout << "Unknown message: " << buffer << std::endl;
+                poco_warning(logger, "Unknown message: " + std::string(buffer));
               }
             }
           } catch (Poco::Exception& e) {
-            std::cout << "Cannot handle this frame " << buffer << " - error " << e.displayText() << std::endl;
+            poco_error(logger, "Cannot handle this frame " + std::string(buffer) + " - error " + e.displayText());
           }
       }
   } while (n > 0 && (flags & Poco::Net::WebSocket::FRAME_OP_BITMASK) != Poco::Net::WebSocket::FRAME_OP_CLOSE);
 
   // Close WebSocket
   ws.close();
-  std::cout << "Disconnected from Kraken WebSockets API" << std::endl;
+  poco_notice(logger, "Disconnected from Kraken WebSockets API");
 
 }
 
 
 uint64_t KrakenExchange::try_fetch_reference_rate(const std::string& pair_name) {
-  std::cout << "Trying to get ticker for pair " << pair_name << " - ";
+  poco_information(logger, "Trying to get ticker for pair " + pair_name);
   Poco::Net::HTTPSClientSession session("api.kraken.com");
   Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_GET, "/0/public/Ticker?pair=" + pair_name);
   session.sendRequest(request);
@@ -221,14 +221,14 @@ uint64_t KrakenExchange::try_fetch_reference_rate(const std::string& pair_name) 
     Poco::JSON::Object::Ptr resultObject = object->get("result").extract<Poco::JSON::Object::Ptr>();
     Poco::DynamicStruct ds = *resultObject;
     std::string svalue = (ds.begin()->second)["p"][0];
-    std::cout << " found price of " << svalue << "(";
+    
     double value = std::stod(svalue);
     long rv = ((double)dec_power * value);
-    std::cout << rv << ")\n";
+    poco_information(logger, " - found price of " + svalue + "(" + std::to_string(rv) + ")");
     return rv;
   }
 
-  std::cout << " ticker not found \n";
+  poco_information(logger, " - ticker not found");
   return 0;
 }
 
@@ -248,10 +248,10 @@ void KrakenExchange::fetch_trading_pairs() {
   Poco::JSON::Object::Ptr resultObject = object->get("result").extract<Poco::JSON::Object::Ptr>();
 
   for (Poco::JSON::Object::ConstIterator it = resultObject->begin(); it != resultObject->end(); ++it) {
-    std::cout << "Adding new trade pair - ";
+    
     std::string name = it->first;
     auto ds = it->second;
-    std::cout << name << "\n";
+    poco_information(logger, "Adding new trade pair - " + name);
 
     Poco::JSON::Object::Ptr asset_pair_object = it->second.extract<Poco::JSON::Object::Ptr>();
     std::string s1 = asset_pair_object->getValue<std::string>("base");
@@ -290,7 +290,7 @@ void KrakenExchange::fetch_trading_pairs() {
     uint64_t v = v1 == 0 ? v2 : dec_power * dec_power / v1;
     //std::max(v2, v1 == 0 ? 0 : dec_power * dec_power / v1);
     s.set_reference_rate_estimate(v);
-    std::cout << "1 USD = " << s.get_reference_rate_estimate() << " " << s.get_symbol() << std::endl;
+    poco_information(logger, "1 USD = " + std::to_string(s.get_reference_rate_estimate()) + " " + s.get_symbol());
   }
 
 }

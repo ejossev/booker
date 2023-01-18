@@ -1,7 +1,9 @@
-#include "LeveledOrderBook.hpp"
-#include "constants.hpp"
+
 #include <algorithm>
 #include <sstream>
+#include "LeveledOrderBook.hpp"
+#include "constants.hpp"
+#include "Utils.hpp"
 
 namespace {
 static const int ob_depth = 10;
