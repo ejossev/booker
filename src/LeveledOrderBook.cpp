@@ -83,10 +83,10 @@ __int128 LeveledOrderBook::estimate_conversion_from_2(__int128 amount) const {
 }
 
 __int128 LeveledOrderBook::estimate_fee_from_1(__int128 amount) const {
-  return amount / 10000 * 24;
+  return amount * 24 / 10000;
 }
 __int128 LeveledOrderBook::estimate_fee_from_2(__int128 amount) const {
-  return amount / 10000 * 24;
+  return amount * 24 / 10000;
 }
 
 void LeveledOrderBook::update() {}

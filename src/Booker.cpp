@@ -34,16 +34,21 @@ void try_find_arbitrage(KrakenExchange* kraken) {
   TriangularArbitrageFinder finder(*kraken);
   do {
     std::cout << "BP1 \n";
-    const auto& arbitrages = finder.calculate_optimal_rates(100 * dec_power);
-    for (const auto& arbitrage_path : arbitrages) {
-      std::cout << "Arbitrage found: ";
-      for (const auto& [exchanged, symbol] : arbitrage_path) {
-        std::cout << exchanged << symbol.get_symbol() << " -> ";
-      }
-      std::cout << std::endl;
-    }
+    std::function<void(std::vector<std::pair<__int128, GenericOrderBook*>>)> callback = 
+        [](std::vector<std::pair<__int128, GenericOrderBook*>> path) {
+          std::cout << "Arbitrage found: ";
+          for (const auto [exchanged, ob] : path) {
+            std::cout << exchanged << ob->get_symbol_1().get_symbol() << " -> ";
+          }
+          std::cout << path.back().second->estimate_conversion_from_1(path.back().first)
+                    << path.back().second->get_symbol_2().get_symbol() << std::endl;
+        };
+    
+
+    finder.calculate_optimal_rates(callback, 100 * dec_power);
+   
     std::cout << "BP2 \n";
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
   } while(true);
 }
   

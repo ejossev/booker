@@ -9,28 +9,30 @@
 
 
 
-std::vector<std::vector<std::pair<__int128, Symbol>>> 
-TriangularArbitrageFinder::calculate_optimal_rates(__int128 start_value_usd = dec_power) {
+
+void TriangularArbitrageFinder::calculate_optimal_rates(
+    std::function<void(std::vector<std::pair<__int128, GenericOrderBook*>>)> callback, 
+    __int128 start_value_usd = dec_power) 
+{
   std::vector<std::vector<std::pair<__int128, Symbol>>> rv;
   rv.reserve(20);
 
   for (const auto& ob_path : cycles2) {
-    std::vector<std::pair<__int128, Symbol>> extended_path;
+    std::vector<std::pair<__int128, GenericOrderBook*>> extended_path;
     extended_path.reserve(6);
 
     __int128 reference_amount = ob_path[0]->get_symbol_1().get_reference_rate_estimate() * start_value_usd / dec_power;
     __int128 exchanged_amount = reference_amount;
-    extended_path.push_back({reference_amount, ob_path[0]->get_symbol_1()});
 
     for (GenericOrderBook* ob : ob_path) {
-      exchanged_amount = ob->estimate_conversion_from_1(exchanged_amount) * 9976 / 10000;
-      extended_path.push_back({exchanged_amount, ob->get_symbol_2()});
+      extended_path.push_back({exchanged_amount, ob});
+      exchanged_amount = ob->estimate_conversion_from_1(exchanged_amount);
+      exchanged_amount = exchanged_amount - ob->estimate_fee_from_2(exchanged_amount);
     }
     if (exchanged_amount > reference_amount) {
-      rv.push_back(extended_path);
+      callback(extended_path);
     }
   }
-  return rv;
 }
 
 
@@ -94,11 +96,10 @@ void TriangularArbitrageFinder::find_cycles() {
   }
 }
 
-
-
 size_t TriangularArbitrageFinder::symbol_index(const Symbol& s) const {
   return symbol_index(s.get_symbol());
 }
+
 size_t TriangularArbitrageFinder::symbol_index(const std::string& s) const {
   for (int i=0; i<_symbols.size(); i++) {
     if (_symbols[i].get_symbol() == s)
