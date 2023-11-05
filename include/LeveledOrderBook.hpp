@@ -1,5 +1,6 @@
 #include "OrderBook.hpp"
 #include <map>
+#include <mutex>
 #pragma once
 
 class KrakenExchange;
@@ -8,15 +9,16 @@ class LeveledOrderBook : public GenericOrderBook {
 protected:
   std::map<__int128, __int128> bids;
   std::map<__int128, __int128> asks;
-  size_t symbol1, symbol2;
+  const Symbol& symbol1, &symbol2;
+  mutable std::mutex update_mutex;
 public:
-  LeveledOrderBook(Symbol& s1, Symbol& s2);
+  LeveledOrderBook(const Symbol& s1, const Symbol& s2);
   LeveledOrderBook(LeveledOrderBook&& other);
   LeveledOrderBook(const LeveledOrderBook&) = delete;
   //LeveledOrderBook& operator=(const LeveledOrderBook& other);
 
-  Symbol& get_symbol_1() const override;
-  Symbol& get_symbol_2() const override;
+  const Symbol& get_symbol_1() const override;
+  const Symbol& get_symbol_2() const override;
 
   __int128 estimate_conversion_from_1(__int128 amount) const override;
   __int128 estimate_conversion_from_2(__int128 amount) const override;

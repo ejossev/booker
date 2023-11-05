@@ -4,6 +4,11 @@
 #include <Poco/Net/HTTPResponse.h>
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Parser.h>
+#include "Poco/JSON/Stringifier.h"
+#include <Poco/Net/SSLException.h>
+#include <Poco/HMACEngine.h>
+#include <Poco/SHA2Engine.h>
+#include <Poco/Base64Encoder.h>
 
 #include <iostream>
 #include <set>
@@ -13,8 +18,9 @@
 #include <chrono>
 
 #include "LeveledOrderBook.hpp"
-#include "Kraken.hpp"
+#include "connector/input/Kraken.hpp"
 #include "Utils.hpp"
+#include "Exceptions.hpp"
 
 namespace {
 static const std::set<std::string> ignore_assets {"ETH2.S"};
@@ -27,7 +33,29 @@ static const std::map<std::string, std::string> rewrite_assets {
 };
 
 static const std::string base_asset("USD");
+static std::string exchange_string("kraken");
 
+std::string sign_message(const std::string& message, const std::string& secret) {
+  Poco::HMACEngine<Poco::SHA2Engine512> hmac(secret);
+  hmac.update(message);
+  const Poco::DigestEngine::Digest& digest = hmac.digest();
+  std::stringstream ss;
+  Poco::Base64Encoder encoder(ss);
+  encoder.write(reinterpret_cast<const char *>(digest.data()), digest.size());
+  encoder.close();
+  return ss.str();
+}
+
+std::string sha256(const std::string& message) {
+  Poco::SHA2Engine256 sha;
+  sha.update(message);
+  const Poco::DigestEngine::Digest& digest = sha.digest();
+  std::stringstream ss;
+  Poco::Base64Encoder encoder(ss);
+  encoder.write(reinterpret_cast<const char *>(digest.data()), digest.size());
+  encoder.close();
+  return ss.str();
+}
 
 const std::string& rewrite_symbol(const std::string& orig) {
   const auto& it = rewrite_assets.find(orig);
@@ -37,24 +65,26 @@ const std::string& rewrite_symbol(const std::string& orig) {
 }
 } //namespace
 
-NullOrderBook KrakenExchange::null_book;
 
-KrakenExchange::KrakenExchange() : logger(Poco::Logger::root().get("Kraken")) {};
+KrakenExchange::KrakenExchange() : logger(Poco::Logger::root().get("Kraken")) {
+ APIKey = config->getString("Kraken.APIKey");
+ PrivateKey = config->getString("Kraken.PrivateKey");
+};
 
-std::vector<Symbol> KrakenExchange::get_all_symbols() {
-  std::vector<Symbol> rv;
-  for (uint64_t i : all_symbols) {
-    rv.push_back(SymbolFactory::get_factory().get_symbol(i));
+std::vector<std::reference_wrapper<const Symbol>> KrakenExchange::get_all_symbols() {
+  std::vector<std::reference_wrapper<const Symbol>> rv;
+  for (const Symbol& s : all_symbols) {
+    rv.push_back(s);
   }
   return rv;
 }
 
-std::map<Symbol, std::set<Symbol>> KrakenExchange::get_trading_pairs() {
-  std::map<Symbol, std::set<Symbol>> rv;
+std::map<std::reference_wrapper<const Symbol>, std::set<std::reference_wrapper<const Symbol>>> KrakenExchange::get_trading_pairs() {
+  std::map<std::reference_wrapper<const Symbol>, std::set<std::reference_wrapper<const Symbol>>> rv;
   for (auto& t : trading_pairs) {
     auto& ob = t.second;
-    Symbol s1 = ob.get_symbol_1();
-    Symbol s2 = ob.get_symbol_2();
+    const Symbol& s1 = ob.get_symbol_1();
+    const Symbol& s2 = ob.get_symbol_2();
     rv[s1].insert(s2);
     rv[s2].insert(s1);
   }
@@ -65,22 +95,12 @@ bool KrakenExchange::has_trading_pair(const Symbol& symbol1, const Symbol& symbo
   return (trading_pair_resolver.count({symbol1.get_symbol(), symbol2.get_symbol()}) > 0);
 }
 
-
-
 void KrakenExchange::start_connection_async() {
   std::thread init(&KrakenExchange::fetch_trading_pairs, this);
   init.join();
   std::thread go(&KrakenExchange::process_ws, this);
   go.detach();
 }
-
-GenericOrderBook& KrakenExchange::get_order_book(Symbol& symbol1, Symbol& symbol2) {
-  if (trading_pair_resolver.count({symbol1.get_symbol(), symbol2.get_symbol()}) > 0)
-    return trading_pairs.find(trading_pair_resolver[{symbol1.get_symbol(), symbol2.get_symbol()}])->second;
-  if (trading_pair_resolver.count({symbol2.get_symbol(), symbol1.get_symbol()}) > 0)
-    return reverse_order_books.find(trading_pair_resolver[{symbol2.get_symbol(), symbol1.get_symbol()}])->second;
-  return null_book;
-};
 
 const GenericOrderBook& KrakenExchange::get_order_book(const Symbol& symbol1, const Symbol& symbol2) {
   if (trading_pair_resolver.count({symbol1.get_symbol(), symbol2.get_symbol()}) > 0) {
@@ -92,15 +112,40 @@ const GenericOrderBook& KrakenExchange::get_order_book(const Symbol& symbol1, co
     const std::string pair_name = trading_pair_resolver[{symbol2.get_symbol(), symbol1.get_symbol()}];
     return reverse_order_books.find(pair_name)->second;
   }
-  return null_book;
+  throw new not_found_exception("unknown ob");
+}
+
+Poco::JSON::Object::Ptr KrakenExchange::send_authenticated_post_request(const std::string& url, std::string content) {
+  Poco::Net::HTTPSClientSession session(https_host);
+  Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_POST, url);
+  request.setContentType("application/x-www-form-urlencoded");
+  request.set("API-Key", APIKey);
+  std::string nonce = std::to_string(time(nullptr));
+  content = "nonce=" + nonce + "&" + content;
+  request.set("API-Sign", sign_message(url + sha256(nonce + content), PrivateKey));
+  session.sendRequest(request) << content; //pair=XBTUSD&type=buy&ordertype=market&volume=1
+  Poco::Net::HTTPResponse response;
+  std::istream &rs = session.receiveResponse(response);
+
+  if (response.getStatus() != Poco::Net::HTTPResponse::HTTP_OK) {
+    std::string response_content;
+    Poco::StreamCopier::copyToString(rs, response_content);
+    throw order_failed_exception(response.getStatus(), response_content);
+  }
+  Poco::JSON::Parser parser;
+  Poco::Dynamic::Var result = parser.parse(rs);
+  Poco::JSON::Object::Ptr object = result.extract<Poco::JSON::Object::Ptr>();
+
+  return object->get("result").extract<Poco::JSON::Object::Ptr>();
 }
 
 
-void KrakenExchange::process_ws()
-{
+
+void KrakenExchange::process_ws() {
+  while (true) try {
   // Set up HTTP client and request
-  Poco::Net::HTTPSClientSession session("ws.kraken.com");
-  Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_GET, "/ws");
+  Poco::Net::HTTPSClientSession session(ws_host);
+  Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_GET, ws_endpoint);
   Poco::Net::HTTPResponse response;
 
   // Set up WebSocket and connect
@@ -196,17 +241,24 @@ void KrakenExchange::process_ws()
           }
       }
   } while (n > 0 && (flags & Poco::Net::WebSocket::FRAME_OP_BITMASK) != Poco::Net::WebSocket::FRAME_OP_CLOSE);
-
-  // Close WebSocket
   ws.close();
   poco_notice(logger, "Disconnected from Kraken WebSockets API");
+
+  } catch (Poco::Net::SSLConnectionUnexpectedlyClosedException& e) {
+    poco_warning(logger, std::string("Caught SSL exception, restarting session ") + e.what());
+  }
+  catch (Poco::TimeoutException& e) {
+    poco_warning(logger, std::string("Caught SSL exception, restarting session ") + e.what());
+  }
+  // Close WebSocket
+  
 
 }
 
 
 uint64_t KrakenExchange::try_fetch_reference_rate(const std::string& pair_name) {
   poco_information(logger, "Trying to get ticker for pair " + pair_name);
-  Poco::Net::HTTPSClientSession session("api.kraken.com");
+  Poco::Net::HTTPSClientSession session(https_host);
   Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_GET, "/0/public/Ticker?pair=" + pair_name);
   session.sendRequest(request);
   Poco::Net::HTTPResponse response;
@@ -235,7 +287,7 @@ uint64_t KrakenExchange::try_fetch_reference_rate(const std::string& pair_name) 
 void KrakenExchange::fetch_trading_pairs() {
   SymbolFactory& symbol_factory = SymbolFactory::get_factory();
 
-  Poco::Net::HTTPSClientSession session("api.kraken.com");
+  Poco::Net::HTTPSClientSession session(https_host);
   Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_GET, "/0/public/AssetPairs");
   session.sendRequest(request);
   Poco::Net::HTTPResponse response;
@@ -251,7 +303,7 @@ void KrakenExchange::fetch_trading_pairs() {
     
     std::string name = it->first;
     auto ds = it->second;
-    poco_information(logger, "Adding new trade pair - " + name);
+    poco_information(logger, "Adding new trade pair - " + name + " - " + ds.toString());
 
     Poco::JSON::Object::Ptr asset_pair_object = it->second.extract<Poco::JSON::Object::Ptr>();
     std::string s1 = asset_pair_object->getValue<std::string>("base");
@@ -260,14 +312,14 @@ void KrakenExchange::fetch_trading_pairs() {
 
     if (ignore_assets.count(s1) > 0 || ignore_assets.count(s2) > 0)
       continue;
-    
+
     s1 = rewrite_symbol(s1);
     s2 = rewrite_symbol(s2);
 
-    Symbol& symbol1 = symbol_factory.get_symbol(s1, s1);
-    Symbol& symbol2 = symbol_factory.get_symbol(s2, s2);
-    all_symbols.insert(symbol_factory.get_symbol_index(s1));
-    all_symbols.insert(symbol_factory.get_symbol_index(s2));
+    const Symbol& symbol1 = symbol_factory.get_symbol(s1, s1, exchange_string);
+    const Symbol& symbol2 = symbol_factory.get_symbol(s2, s2, exchange_string);
+    all_symbols.insert(symbol1);
+    all_symbols.insert(symbol2);
 
     LeveledOrderBook ob(symbol1, symbol2);
     trading_pair_resolver.insert(std::make_pair(std::make_pair(s1, s2), wsname));
@@ -278,8 +330,7 @@ void KrakenExchange::fetch_trading_pairs() {
   }
 
 
-  for (uint64_t s_index : all_symbols) {
-    Symbol& s = symbol_factory.get_symbol(s_index);
+  for (const Symbol& s : all_symbols) {
     if (s.get_symbol() == base_asset) {
       s.set_reference_rate_estimate(dec_power);
       continue;
@@ -293,4 +344,40 @@ void KrakenExchange::fetch_trading_pairs() {
     poco_information(logger, "1 USD = " + std::to_string(s.get_reference_rate_estimate()) + " " + s.get_symbol());
   }
 
+}
+
+bool KrakenExchange::send_trade_sync(const Symbol& symbol1, const Symbol& symbol2, const uint64_t amount) {
+  std::string content = "";
+  if (has_trading_pair(symbol1, symbol2)) {
+    content = "pair=" + trading_pair_resolver[std::make_pair(symbol1.get_symbol(), symbol2.get_symbol())]
+        + "&type=buy&ordertype=market&volume=" + amount_to_string(amount);
+  } else if (has_trading_pair(symbol2, symbol1)) {
+    auto& ob = this->get_order_book(symbol1, symbol2);
+    uint64_t exchanged_amount = ob.estimate_conversion_from_1(amount);
+    content = "pair=" + trading_pair_resolver[std::make_pair(symbol2.get_symbol(), symbol1.get_symbol())]
+        + "&type=sell&ordertype=market&volume=" + amount_to_string(exchanged_amount);
+  } else {
+    // unknown trade pair...
+    poco_critical(logger, "Trying to trade unknown trade pair " + symbol1.get_symbol() + "/" + symbol2.get_symbol());
+    return false;
+  }
+
+  try {
+    Poco::JSON::Object::Ptr resultObject = send_authenticated_post_request(http_buy_endpoint, content);
+    // parse the response here and see if the error field is empty and txid is returned.
+    if (resultObject->has("error")) {
+      Poco::JSON::Array::Ptr errors = resultObject->getArray("error");
+      if (errors->size() > 0) {
+        return false;
+      }
+    }
+    if (!resultObject->has("txid")) {
+      return false;
+    }
+    return true;
+
+  } catch (order_failed_exception& e) {
+    poco_error(logger, "failed to enter order for trade " + symbol1.get_symbol() + "/" + symbol2.get_symbol() + " of volume " + std::to_string(amount));
+    return false;
+  }
 }

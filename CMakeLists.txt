@@ -8,7 +8,13 @@ include_directories(
 
 file(GLOB all_SRCS
         "${PROJECT_SOURCE_DIR}/include/*.hpp"
+        "${PROJECT_SOURCE_DIR}/include/connector/input/*.hpp"
+        "${PROJECT_SOURCE_DIR}/include/connector/trade/*.hpp"
+        "${PROJECT_SOURCE_DIR}/include/strategy/*.hpp"
         "${PROJECT_SOURCE_DIR}/src/*.cpp"
+        "${PROJECT_SOURCE_DIR}/src/connector/input/*.cpp"
+        "${PROJECT_SOURCE_DIR}/src/connector/trade/*.cpp"
+        "${PROJECT_SOURCE_DIR}/src/strategy/*.cpp"
         )
 
 

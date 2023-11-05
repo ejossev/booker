@@ -1,5 +1,6 @@
 #include <sstream>
 #include "OrderBook.hpp"
+#include <iostream>
 
 namespace {
   static std::string null_name("NULL");
@@ -8,20 +9,15 @@ namespace {
 SymbolFactory SymbolFactory::_factory;
 
 
-NullOrderBook::NullOrderBook(Symbol& s1, Symbol& s2) {
-  symbol1 = SymbolFactory::get_factory().get_symbol_index(s1.get_symbol());
-  symbol2 = SymbolFactory::get_factory().get_symbol_index(s2.get_symbol());
+NullOrderBook::NullOrderBook(const Symbol& s1, const Symbol& s2) : symbol1(s1), symbol2(s2) {}
+
+
+const Symbol& NullOrderBook::get_symbol_1() const {
+  return symbol1;
 }
 
-NullOrderBook::NullOrderBook() : symbol1(-1), symbol2(-1) {
-}
-
-Symbol& NullOrderBook::get_symbol_1() const {
-  return SymbolFactory::get_factory().get_symbol(symbol1);;
-}
-
-Symbol& NullOrderBook::get_symbol_2() const {
-  return SymbolFactory::get_factory().get_symbol(symbol2);
+const Symbol& NullOrderBook::get_symbol_2() const {
+  return symbol2;
 }
 
 __int128 NullOrderBook::estimate_conversion_from_1(__int128 amount) const {
@@ -49,36 +45,28 @@ bool operator==(const Symbol& first, const Symbol& second) {
 }
 
 
-Symbol::Symbol(std::string& symbol, std::string& name) : _name(name), _symbol(symbol) {}
+Symbol::Symbol(const std::string& symbol, const std::string& name, const std::string& exchange) :
+    _name(name), _symbol(symbol), _exchange(exchange) {}
+Symbol::Symbol(const std::string& symbol, const std::string& exchange) :
+    _name(), _symbol(symbol), _exchange(exchange) {}
 Symbol::Symbol(Symbol&& other) {
   _name = std::move(other._name);
   _symbol = std::move(other._symbol);
+  _exchange = std::move(other._exchange);
   _reference_rate_estimate = other._reference_rate_estimate;
 }
-Symbol::Symbol(const Symbol& other) {
-  _name = other._name;
-  _symbol = other._symbol;
-  _reference_rate_estimate = other._reference_rate_estimate;
-}
-std::string Symbol::get_symbol() const { return _symbol; }
-std::string Symbol::get_name() const { return _name; }
+
+const std::string& Symbol::get_symbol() const { return _symbol; }
+const std::string& Symbol::get_name() const { return _name; }
+const std::string& Symbol::get_exchange() const { return _exchange; }
 __int128 Symbol::get_reference_rate_estimate() const { return _reference_rate_estimate; }
 void Symbol::set_reference_rate_estimate(__int128 reference_rate_estimate) const {
   _reference_rate_estimate = reference_rate_estimate;
 }
 
-Symbol& Symbol::operator=(const Symbol& other) {
-  _name = other._name;
-  _symbol = other._symbol;
-  _reference_rate_estimate = other._reference_rate_estimate;
-  return *this;
-}
-
-NullOrderBook ReverseOrderBook::_nb = NullOrderBook();
-ReverseOrderBook::ReverseOrderBook() : _orig(_nb) {};
 ReverseOrderBook::ReverseOrderBook(GenericOrderBook& orig) : _orig(orig) {};
-Symbol& ReverseOrderBook::get_symbol_1() const { return _orig.get_symbol_2();};
-Symbol& ReverseOrderBook::get_symbol_2() const { return _orig.get_symbol_1();};
+const Symbol& ReverseOrderBook::get_symbol_1() const { return _orig.get_symbol_2();};
+const Symbol& ReverseOrderBook::get_symbol_2() const { return _orig.get_symbol_1();};
 __int128 ReverseOrderBook::estimate_conversion_from_1(__int128 amount) const { return _orig.estimate_conversion_from_2(amount);};
 __int128 ReverseOrderBook::estimate_conversion_from_2(__int128 amount) const { return _orig.estimate_conversion_from_1(amount);};
 __int128 ReverseOrderBook::estimate_fee_from_1(__int128 amount) const { return _orig.estimate_fee_from_2(amount);};
@@ -91,42 +79,43 @@ std::string ReverseOrderBook::print() const {
 SymbolFactory& SymbolFactory::get_factory() {
   return _factory;
 }
-Symbol& SymbolFactory::get_symbol(std::string& symbol, std::string& name) {
-  const auto it = _symbol_indices.find(symbol);
-  if (it != _symbol_indices.end())
-    return _symbols[it->second];
 
+const Symbol& SymbolFactory::add_symbol(const std::string& symbol, const std::string& name, const std::string& exchange) {
   size_t length = _symbols.size();
-  _symbol_indices.insert({symbol, length});
-  _symbols.push_back(Symbol(symbol, name));
+  _symbol_indices.insert({std::make_pair(symbol, exchange), length});
+  _symbols.push_back(Symbol(symbol, name, exchange));
+
   return _symbols[length];
 }
 
-Symbol& SymbolFactory::get_symbol(std::string& symbol) {
-  const auto it = _symbol_indices.find(symbol);
-  if (it != _symbol_indices.end())
-    return _symbols[it->second];
-
+const Symbol& SymbolFactory::add_symbol(const std::string& symbol, const std::string& exchange) {
   size_t length = _symbols.size();
-  _symbol_indices.insert({symbol, length});
-  _symbols.push_back(Symbol(symbol, symbol));
+  _symbol_indices.insert({std::make_pair(symbol, exchange), length});
+  _symbols.push_back(Symbol(symbol, exchange));
+
   return _symbols[length];
 }
 
-Symbol& SymbolFactory::get_symbol(size_t index) {
-  return _symbols[index];
+const Symbol& SymbolFactory::get_symbol(const std::string& symbol, const std::string& name, const std::string& exchange) {
+  const auto it = _symbol_indices.find(std::make_pair(symbol, exchange));
+  if (it != _symbol_indices.end())
+    return _symbols[it->second];
+
+  return add_symbol(symbol, name, exchange);
 }
+
+const Symbol& SymbolFactory::get_symbol(const std::string& symbol, const std::string& exchange) {
+  const auto it = _symbol_indices.find(std::make_pair(symbol, exchange));
+  if (it != _symbol_indices.end())
+    return _symbols[it->second];
+
+  return add_symbol(symbol, exchange);
+}
+
 size_t SymbolFactory::count() {
   return _symbols.size();
 }
 
 std::vector<Symbol>& SymbolFactory::get_all_symbols() {
   return _symbols;
-}
-
-size_t SymbolFactory::get_symbol_index(const std::string& symbol) {
-  const auto it = _symbol_indices.find(symbol);
-  if (it != _symbol_indices.end())
-    return it->second;
-  throw std::runtime_error("Not found");
 }

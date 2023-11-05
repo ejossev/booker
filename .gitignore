@@ -38,3 +38,7 @@ cmake_install.cmake
 CmakeFiles/*
 Makefile
 .vscode/*
+
+
+include/strategy/*
+src/strategy/*

@@ -9,10 +9,9 @@ namespace {
 static const int ob_depth = 10;
 }
 
-LeveledOrderBook::LeveledOrderBook(Symbol& s1, Symbol& s2) {
-  symbol1 = SymbolFactory::get_factory().get_symbol_index(s1.get_symbol());
-  symbol2 = SymbolFactory::get_factory().get_symbol_index(s2.get_symbol());
+LeveledOrderBook::LeveledOrderBook(const Symbol& s1, const Symbol& s2) : symbol1(s1), symbol2(s2) {
 }
+
 LeveledOrderBook::LeveledOrderBook(LeveledOrderBook&& other) : symbol1(other.symbol1), symbol2(other.symbol2) {
   bids = std::move(other.bids);
   asks = std::move(other.asks);
@@ -31,8 +30,8 @@ std::string LeveledOrderBook::print() const {
   return ss.str();
 }
 
-Symbol& LeveledOrderBook::get_symbol_1() const { return SymbolFactory::get_factory().get_symbol(symbol1); }
-Symbol& LeveledOrderBook::get_symbol_2() const { return SymbolFactory::get_factory().get_symbol(symbol2); }
+const Symbol& LeveledOrderBook::get_symbol_1() const { return symbol1; }
+const Symbol& LeveledOrderBook::get_symbol_2() const { return symbol2; }
 
 __int128 LeveledOrderBook::estimate_conversion_from_1(__int128 amount) const {
 
@@ -42,6 +41,7 @@ __int128 LeveledOrderBook::estimate_conversion_from_1(__int128 amount) const {
   // bids - 1681800000000
   // zamenit BTX na USD znamena pouzit bids
 
+  const std::lock_guard<std::mutex> lock(update_mutex);
   __int128 volume_consumed = 0;
   __int128 received = 0;
   auto level_it = bids.rbegin();
@@ -67,6 +67,7 @@ __int128 LeveledOrderBook::estimate_conversion_from_1(__int128 amount) const {
 // }
 
 __int128 LeveledOrderBook::estimate_conversion_from_2(__int128 amount) const {
+  const std::lock_guard<std::mutex> lock(update_mutex);
   __int128 volume_consumed = 0;
   __int128 received = 0;
   auto level_it = asks.begin();
@@ -92,6 +93,7 @@ __int128 LeveledOrderBook::estimate_fee_from_2(__int128 amount) const {
 void LeveledOrderBook::update() {}
 
 void LeveledOrderBook::updateAskLevel(__int128 price, __int128 volume) {
+  const std::lock_guard<std::mutex> lock(update_mutex);
   if (volume == 0) {
     asks.erase(price);
     return;
@@ -103,6 +105,7 @@ void LeveledOrderBook::updateAskLevel(__int128 price, __int128 volume) {
   }
 }
 void LeveledOrderBook::updateBidLevel(__int128 price, __int128 volume) {
+  const std::lock_guard<std::mutex> lock(update_mutex);
   if (volume == 0) {
     bids.erase(price);
     return;
